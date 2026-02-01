@@ -41,8 +41,6 @@ services:
       - SCHEDULE_TIME=02:00                     # Process at 2 AM
 ```
 
-Available tags: `latest`, `v1.2.3`, `v1.2`, `v1` (semver tags are generated on release)
-
 ### 2. Configure iPhone PhotoSync
 
 Set up PhotoSync to auto-upload to `/path/to/nas/photos` on your NAS.
