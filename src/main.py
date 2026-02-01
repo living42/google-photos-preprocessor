@@ -7,19 +7,32 @@ from pathlib import Path
 
 from src.database import ProgressDatabase
 from src.processor import PhotoProcessor
+from src.scheduler import DailyScheduler
 
 
 def main() -> int:
     config = load_config()
     logger = setup_logging(config['log_level'])
-    
-    run_processor(config, logger)
-    
+
     if config['run_once']:
+        run_processor(config, logger)
         logger.info("RUN_ONCE enabled, exiting")
     else:
-        logger.info("SCHEDULER MODE: Not implemented in simplified version")
-    
+        # Create wrapper function that captures config and logger
+        def processor_job():
+            run_processor(config, logger)
+
+        scheduler = DailyScheduler(
+            schedule_time=config['schedule_time'],
+            job_func=processor_job,
+            logger=logger
+        )
+
+        try:
+            scheduler.start()
+        except KeyboardInterrupt:
+            scheduler.stop()
+
     return 0
 
 
@@ -33,6 +46,7 @@ def load_config():
         'run_once': os.getenv('RUN_ONCE', 'true').lower() == 'true',
         'scan_days': int(os.getenv('SCAN_DAYS', '30')),
         'target_retention_days': int(os.getenv('TARGET_RETENTION_DAYS', '30')),
+        'schedule_time': os.getenv('SCHEDULE_TIME', '02:00'),
     }
 
     if not Path(config['source_dir']).exists():
@@ -57,14 +71,14 @@ def load_config():
 
 def setup_logging(log_level: str) -> logging.Logger:
     level = getattr(logging, log_level.upper(), logging.INFO)
-    
+
     logging.basicConfig(
         level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[logging.StreamHandler(sys.stdout)]
     )
-    
+
     logger = logging.getLogger('gp_preprocessor')
     logger.setLevel(level)
     return logger
@@ -74,18 +88,20 @@ def run_processor(config, logger) -> None:
     logger.info("=" * 60)
     logger.info("Google Photos Preprocessor - Starting run")
     logger.info("=" * 60)
-    
+
     logger.info(f"Source: {config['source_dir']}")
     logger.info(f"Target: {config['target_dir']}")
     logger.info(f"Database: {config['db_path']}")
     logger.info(f"Scan window: {config['scan_days']} days")
     logger.info(f"Target retention: {config['target_retention_days']} days")
-    
+    if not config['run_once']:
+        logger.info(f"Schedule time: {config['schedule_time']}")
+
     db = ProgressDatabase(
         db_path=config['db_path'],
         logger=logger
     )
-    
+
     processor = PhotoProcessor(
         source_dir=config['source_dir'],
         target_dir=config['target_dir'],
@@ -95,16 +111,16 @@ def run_processor(config, logger) -> None:
         target_retention_days=config['target_retention_days'],
         logger=logger
     )
-    
+
     files_to_process = processor.scan_source_directory()
-    
+
     if not files_to_process:
         logger.info("No new or modified files to process")
     else:
         logger.info(f"Processing {len(files_to_process)} files...")
         processed_count = processor.process_files(files_to_process)
         logger.info(f"Processing complete: {processed_count} files")
-    
+
     logger.info(f"Total processed files in DB: {db.get_count()}")
     logger.info("=" * 60)
     logger.info("Run complete")
@@ -114,9 +130,6 @@ def run_processor(config, logger) -> None:
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except KeyboardInterrupt:
-        print("\nInterrupted by user", file=sys.stderr)
-        sys.exit(130)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         import traceback

@@ -61,7 +61,8 @@ All configuration is done via environment variables:
 | `TARGET_DIR` | `/data/output` | Directory where processed photos are saved |
 | `DB_PATH` | `/data/progress/progress.db` | SQLite database path for tracking processed files |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `RUN_ONCE` | `true` | Exit after single run if `true`, otherwise runs continuously |
+| `RUN_ONCE` | `true` | Exit after single run if `true`, otherwise runs on schedule |
+| `SCHEDULE_TIME` | `01:00` | Daily run time in 24-hour format (HH:MM). Only used when `RUN_ONCE=false` |
 | `SCAN_DAYS` | `30` | Number of days to look back when scanning for new files. Set to `0` to scan the entire library |
 | `TARGET_RETENTION_DAYS` | `30` | Days to keep processed files in target directory. Files older than this are deleted. Disabled when `SCAN_DAYS=0`. Must be ≤ `SCAN_DAYS` |
 
