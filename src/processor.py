@@ -51,11 +51,13 @@ class PhotoProcessor:
         ]
 
         # Build find command with extension filters
+        # If scan_days is 0 or less, scan the whole library (no -mtime filter)
         find_cmd = [
             'find', str(self.source_dir),
             '-type', 'f',
-            '-mtime', f'-{self.scan_days}',
         ]
+        if self.scan_days > 0:
+            find_cmd.extend(['-mtime', f'-{self.scan_days}'])
 
         # Add extension filters (case insensitive)
         ext_filters = []

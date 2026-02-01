@@ -17,13 +17,23 @@ iPhone → NAS → Preprocessor → Pixel Phone → Google Photos
 ```
 
 1. **iPhone uploads to NAS**: Use PhotoSync or similar to auto-upload Live Photos to your NAS
-2. **Preprocessor runs**: Converts Live Photos to Google Photos-compatible format
-3. **Pixel Phone download files**: Downloads processed photos/videos from the output folder
+2. **Preprocessor runs**: Converts Live Photos to Google Photos-compatible format, and places files in another directory so your library is not modified
+3. **Pixel Phone downloads files**: Downloads processed photos/videos from the output folder
 4. **Google Photos uploads**: Pixel automatically uploads everything to your library
 
 ## Quick Start
 
-### 1. Create docker-compose.yml
+> **Note:** Steps 1 and 2 can be skipped if you already have your iPhone and Pixel sync set up and working.
+
+### 1. Configure iPhone PhotoSync
+
+Set up PhotoSync to auto-upload to `/path/to/nas/photos` on your NAS.
+
+### 2. Configure Pixel Sync
+
+Install **FolderSync** on your Pixel and configure it to sync `/path/to/nas/pixel/sync` folder to your phone's local storage.
+
+### 3. Create docker-compose.yml
 
 ```yaml
 services:
@@ -31,7 +41,7 @@ services:
     image: ghcr.io/living42/google-photos-preprocessor:latest
     volumes:
       - /path/to/nas/photos:/data/source:ro     # iPhone uploads here
-      - /path/to/pixel/sync:/data/output:rw     # Pixel reads from here
+      - /path/to/nas/pixel/sync:/data/output:rw     # Pixel reads from here
       - ./data:/data/progress:rw                # Database
     environment:
       - SOURCE_DIR=/data/source
@@ -41,18 +51,40 @@ services:
       - SCHEDULE_TIME=02:00                     # Process at 2 AM
 ```
 
-### 2. Configure iPhone PhotoSync
+#### Environment Variables
 
-Set up PhotoSync to auto-upload to `/path/to/nas/photos` on your NAS.
+All configuration is done via environment variables:
 
-### 3. Configure Pixel Sync
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SOURCE_DIR` | `/data/source` | Directory containing iPhone photos to process |
+| `TARGET_DIR` | `/data/output` | Directory where processed photos are saved |
+| `DB_PATH` | `/data/progress/progress.db` | SQLite database path for tracking processed files |
+| `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `RUN_ONCE` | `true` | Exit after single run if `true`, otherwise runs continuously |
+| `SCAN_DAYS` | `30` | Number of days to look back when scanning for new files. Set to `0` to scan the entire library |
 
-Install **FolderSync** on your Pixel and configure it to sync `/path/to/pixel/sync` folder to your phone's local storage.
+### 4. Start the Preprocessor
 
-### 4. Start
+#### Initial Setup: Process Your Entire Library
+
+For the first run, you may want to process your entire photo library (not just recent files). Use this command to scan and convert all photos:
 
 ```bash
-docker-compose up -d
+docker compose run --rm -e RUN_ONCE=true -e SCAN_DAYS=0 preprocessor /entrypoint.sh
+```
+
+This will:
+- Scan your entire photo library (`SCAN_DAYS=0`)
+- Run once and exit (`RUN_ONCE=true`)
+- Process all Live Photos found in the source directory
+
+#### Run Continuously
+
+After the initial run, start the service to automatically process new photos on a schedule:
+
+```bash
+docker compose up -d
 ```
 
 ## What It Does
