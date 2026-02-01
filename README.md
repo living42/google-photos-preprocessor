@@ -4,7 +4,7 @@ A solution to sync iPhone Live Photos to Google Photos via a Pixel phone.
 
 ## The Problem
 
-iPhone Live Photos are incompatible with Google Photos. When uploaded directly, they split into separate photo and video files, breaking the Live Photo experience.
+iPhone captured Live Photo backup to NAS, often stored as two files - one is the picture, another one is a short video. If you want to upload these photos to Google Photos using Pixel devices (Pixel 5 can upload unlimited amount of compressed photos/videos), you get separate photo and video appearing in the Google Photos library, breaking the Live Photo experience.
 
 ## The Solution
 
