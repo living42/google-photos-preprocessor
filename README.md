@@ -63,6 +63,7 @@ All configuration is done via environment variables:
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `RUN_ONCE` | `true` | Exit after single run if `true`, otherwise runs continuously |
 | `SCAN_DAYS` | `30` | Number of days to look back when scanning for new files. Set to `0` to scan the entire library |
+| `TARGET_RETENTION_DAYS` | `30` | Days to keep processed files in target directory. Files older than this are deleted. Disabled when `SCAN_DAYS=0`. Must be ≤ `SCAN_DAYS` |
 
 ### 4. Start the Preprocessor
 

@@ -80,4 +80,4 @@ Configuration is via environment variables (see `load_config()` in main.py):
 - `LOG_LEVEL` - Logging level (default: INFO)
 - `RUN_ONCE` - Exit after single run if true (default: false)
 - `SCAN_DAYS` - Days to look back when scanning (default: 30, set to 0 to scan entire library)
-- `DB_RETENTION_DAYS` - Days to keep DB records (default: 90)
+- `TARGET_RETENTION_DAYS` - Days to keep processed files in target directory (default: 30, must be ≤ SCAN_DAYS)

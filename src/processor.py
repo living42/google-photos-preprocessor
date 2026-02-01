@@ -23,6 +23,7 @@ class PhotoProcessor:
         db,
         motionphoto2_path: str,
         scan_days: int,
+        target_retention_days: int,
         logger=None
     ):
         self.source_dir = Path(source_dir).resolve()
@@ -30,6 +31,7 @@ class PhotoProcessor:
         self.db = db
         self.motionphoto2_path = motionphoto2_path
         self.scan_days = scan_days
+        self.target_retention_days = target_retention_days
         self.logger = logger or logging.getLogger(__name__)
 
         if not os.path.isfile(self.motionphoto2_path):
@@ -37,7 +39,10 @@ class PhotoProcessor:
         if not os.access(self.motionphoto2_path, os.X_OK):
             raise PermissionError(f"motionphoto2 binary is not executable: {self.motionphoto2_path}")
 
-        self.logger.info(f"PhotoProcessor initialized: scan_days={scan_days}")
+        self.logger.info(
+            f"PhotoProcessor initialized: scan_days={scan_days}, "
+            f"target_retention_days={target_retention_days}"
+        )
 
     def scan_source_directory(self) -> List[Tuple[str, str]]:
         """Scan for files and return (relative_path, full_path) for unprocessed files."""
@@ -248,4 +253,69 @@ class PhotoProcessor:
         if processed_paths:
             self.db.add_processed(processed_paths)
 
+        # Clean up old target files
+        self.cleanup_old_targets()
+
         return processed_count
+
+    def cleanup_old_targets(self) -> int:
+        """Clean up target files and DB records older than retention period.
+
+        For Live Photos, the video file (MOV) won't exist as a separate target
+        file since it was merged into the photo. We skip deletion for these.
+
+        Returns number of files cleaned up.
+        """
+        if self.target_retention_days <= 0:
+            self.logger.debug("Target retention disabled (target_retention_days=0)")
+            return 0
+
+        self.logger.info(
+            f"Cleaning up targets older than {self.target_retention_days} days"
+        )
+
+        old_records = self.db.get_old_records(self.target_retention_days)
+        if not old_records:
+            self.logger.info("No old records to clean up")
+            return 0
+
+        self.logger.info(f"Found {len(old_records)} old records to clean up")
+
+        cleaned_paths = []
+        deleted_count = 0
+        skipped_count = 0
+
+        for relative_path, processed_at in old_records:
+            target_path = self.target_dir / relative_path
+
+            if target_path.exists():
+                try:
+                    target_path.unlink()
+                    self.logger.debug(f"Deleted old target file: {target_path}")
+                    deleted_count += 1
+                except OSError as e:
+                    self.logger.warning(
+                        f"Failed to delete {target_path}: {e}"
+                    )
+                    continue
+            else:
+                # Target doesn't exist - this is expected for Live Photo video files
+                # (MOV files get merged into the photo file)
+                self.logger.debug(
+                    f"Target file not found (may be Live Photo video): {target_path}"
+                )
+                skipped_count += 1
+
+            cleaned_paths.append(relative_path)
+
+        # Remove records from database
+        if cleaned_paths:
+            self.db.remove_records(cleaned_paths)
+
+        self.logger.info(
+            f"Cleanup complete: {deleted_count} files deleted, "
+            f"{skipped_count} skipped (not found), "
+            f"{len(cleaned_paths)} records removed from DB"
+        )
+
+        return len(cleaned_paths)

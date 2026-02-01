@@ -32,14 +32,26 @@ def load_config():
         'motionphoto2_path': os.getenv('MOTIONPHOTO2_PATH', '/usr/local/bin/motionphoto2'),
         'run_once': os.getenv('RUN_ONCE', 'true').lower() == 'true',
         'scan_days': int(os.getenv('SCAN_DAYS', '30')),
+        'target_retention_days': int(os.getenv('TARGET_RETENTION_DAYS', '30')),
     }
-    
+
     if not Path(config['source_dir']).exists():
         raise FileNotFoundError(f"Source directory does not exist: {config['source_dir']}")
-    
+
+    # If scanning entire library (SCAN_DAYS=0), disable cleanup
+    if config['scan_days'] == 0:
+        config['target_retention_days'] = 0
+    # Validate retention days cannot exceed scan days (when scan_days > 0)
+    elif config['target_retention_days'] > config['scan_days']:
+        raise ValueError(
+            f"TARGET_RETENTION_DAYS ({config['target_retention_days']}) "
+            f"cannot exceed SCAN_DAYS ({config['scan_days']}). "
+            f"This prevents cleaning files that might be re-scanned."
+        )
+
     Path(config['target_dir']).mkdir(parents=True, exist_ok=True)
     Path(config['db_path']).parent.mkdir(parents=True, exist_ok=True)
-    
+
     return config
 
 
@@ -67,6 +79,7 @@ def run_processor(config, logger) -> None:
     logger.info(f"Target: {config['target_dir']}")
     logger.info(f"Database: {config['db_path']}")
     logger.info(f"Scan window: {config['scan_days']} days")
+    logger.info(f"Target retention: {config['target_retention_days']} days")
     
     db = ProgressDatabase(
         db_path=config['db_path'],
@@ -79,6 +92,7 @@ def run_processor(config, logger) -> None:
         db=db,
         motionphoto2_path=config['motionphoto2_path'],
         scan_days=config['scan_days'],
+        target_retention_days=config['target_retention_days'],
         logger=logger
     )
     

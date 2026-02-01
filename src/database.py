@@ -64,3 +64,41 @@ class ProgressDatabase:
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT COUNT(*) as count FROM processed_files")
             return cursor.fetchone()['count']
+
+    def get_old_records(self, days: int) -> list:
+        """Get records older than specified days.
+
+        Returns list of (relative_path, processed_at) tuples.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT relative_path, processed_at FROM processed_files "
+                "WHERE processed_at < (unixepoch() - ?)",
+                (days * 86400,)
+            )
+            return [(row['relative_path'], row['processed_at']) for row in cursor.fetchall()]
+
+    def remove_records(self, paths: List[str]) -> int:
+        """Remove records by relative paths.
+
+        Returns number of records deleted.
+        """
+        if not paths:
+            return 0
+
+        with self._get_connection() as conn:
+            # SQLite has a limit on number of parameters, process in chunks
+            chunk_size = 900  # Safe limit below SQLite's default 999
+            total_deleted = 0
+
+            for i in range(0, len(paths), chunk_size):
+                chunk = paths[i:i + chunk_size]
+                placeholders = ','.join('?' * len(chunk))
+                cursor = conn.execute(
+                    f"DELETE FROM processed_files WHERE relative_path IN ({placeholders})",
+                    chunk
+                )
+                total_deleted += cursor.rowcount
+
+        self.logger.info(f"Removed {total_deleted} old records from database")
+        return total_deleted
