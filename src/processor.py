@@ -229,7 +229,6 @@ class PhotoProcessor:
 
         # Process batches
         processed_count = 0
-        processed_paths = []
         total_batches = len(batches)
 
         for batch_num, batch in enumerate(batches):
@@ -239,19 +238,20 @@ class PhotoProcessor:
             try:
                 self.run_motionphoto2(temp_dir)
 
+                batch_paths = []
                 for relative_path, _ in batch:
-                    processed_paths.append(relative_path)
+                    batch_paths.append(relative_path)
                     self.logger.info(f"Processed: {relative_path}")
 
                 processed_count += len(batch)
                 self.logger.info(f"Batch {batch_num + 1} complete")
 
+                # Record batch to database immediately
+                if batch_paths:
+                    self.db.add_processed(batch_paths)
+
             finally:
                 self.cleanup_temp_dir(temp_dir)
-
-        # Record all successfully processed files
-        if processed_paths:
-            self.db.add_processed(processed_paths)
 
         # Clean up old target files
         self.cleanup_old_targets()
