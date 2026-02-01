@@ -5,12 +5,13 @@ import time
 import shutil
 import subprocess
 import logging
+from collections import defaultdict
 from pathlib import Path
 from typing import List, Tuple
 
 
 class PhotoProcessor:
-    """Simplified processor - no live photo detection, crashes on errors."""
+    """Photo processor with Live Photo pair detection and batching."""
 
     BATCH_SIZE = 100
     MOTIONPHOTO2_TIMEOUT = 3600
@@ -110,7 +111,7 @@ class PhotoProcessor:
 
             temp_link = os.path.join(temp_dir, relative_path)
             os.symlink(full_path, temp_link)
-            self.logger.info(f"Created symlink: {full_path} -> {temp_link}")
+            self.logger.debug(f"Created symlink: {full_path} -> {temp_link}")
 
         self.logger.debug(f"Created temp directory with {len(files)} symlinks: {temp_dir}")
         return temp_dir
@@ -152,19 +153,81 @@ class PhotoProcessor:
             raise RuntimeError(f"Failed to cleanup temp directory {temp_dir}: {e}")
 
     def process_files(self, files: List[Tuple[str, str]]) -> int:
-        """Process files in batches - crashes on any error."""
+        """Process files in batches, keeping Live Photo pairs together."""
         if not files:
             return 0
 
-        total_batches = (len(files) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+        # Photo extensions and video extensions for Live Photo detection
+        photo_exts = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif'}
+        video_exts = {'.mp4', '.mov', '.avi', '.mkv', '.flv', '.wmv', '.m4v', '.3gp', '.webm', '.mts', '.m2ts'}
+
+        # Group files by basename (filename without extension)
+        basename_groups = defaultdict(list)
+        for relative_path, full_path in files:
+            # Get basename without extension
+            path_obj = Path(relative_path)
+            basename = path_obj.stem.lower()  # e.g., "IMG_9647" from "IMG_9647.HEIC"
+            ext = path_obj.suffix.lower()
+            basename_groups[basename].append((relative_path, full_path, ext))
+
+        # Identify Live Photo pairs and single files
+        pairs = []  # List of (photo_path, video_path) tuples
+        singles = []  # List of (relative_path, full_path) for unpaired files
+
+        for basename, group in basename_groups.items():
+            if len(group) == 2:
+                # Check if it's a photo+video pair
+                ext1, ext2 = group[0][2], group[1][2]
+                is_pair = (ext1 in photo_exts and ext2 in video_exts) or (ext1 in video_exts and ext2 in photo_exts)
+                if is_pair:
+                    # Sort so photo comes first
+                    if ext1 in video_exts:
+                        group[0], group[1] = group[1], group[0]
+                    pairs.append(((group[0][0], group[0][1]), (group[1][0], group[1][1])))
+                else:
+                    # Same type, treat as singles
+                    for item in group:
+                        singles.append((item[0], item[1]))
+            else:
+                # Single file or more than 2 files with same basename
+                for item in group:
+                    singles.append((item[0], item[1]))
+
+        self.logger.info(f"Found {len(pairs)} Live Photo pairs and {len(singles)} single files")
+
+        # Create batches treating pairs as atomic units
+        batches = []
+        current_batch = []
+        current_batch_count = 0  # Count pairs as 1 unit, singles as 1 unit
+
+        # Add pairs first (process pairs together)
+        for photo, video in pairs:
+            if current_batch_count >= self.BATCH_SIZE:
+                batches.append(current_batch)
+                current_batch = []
+                current_batch_count = 0
+            current_batch.extend([photo, video])
+            current_batch_count += 1  # Pair counts as 1 unit
+
+        # Add singles
+        for single in singles:
+            if current_batch_count >= self.BATCH_SIZE:
+                batches.append(current_batch)
+                current_batch = []
+                current_batch_count = 0
+            current_batch.append(single)
+            current_batch_count += 1
+
+        # Don't forget the last batch
+        if current_batch:
+            batches.append(current_batch)
+
+        # Process batches
         processed_count = 0
         processed_paths = []
+        total_batches = len(batches)
 
-        for batch_num in range(total_batches):
-            start_idx = batch_num * self.BATCH_SIZE
-            end_idx = min(start_idx + self.BATCH_SIZE, len(files))
-            batch = files[start_idx:end_idx]
-
+        for batch_num, batch in enumerate(batches):
             self.logger.info(f"Processing batch {batch_num + 1}/{total_batches} ({len(batch)} files)")
 
             temp_dir = self.create_temp_symlinks(batch)
