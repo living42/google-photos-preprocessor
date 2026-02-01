@@ -8,7 +8,7 @@ SOURCE_DIR=${SOURCE_DIR:-./samples}
 rm -rf ./output
 mkdir ./output
 
-docker run -it --rm \
+docker run --rm \
     -v "${SOURCE_DIR}":/data/input:ro \
     -v ./output:/data/output:rw \
     -v ./data/progress:/data/progress:rw \

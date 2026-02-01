@@ -128,7 +128,6 @@ class PhotoProcessor:
             '--input-directory', temp_dir,
             '--output-directory', str(self.target_dir),
             '--exif-match',
-            '--copy-unmuxed',
             '--recursive',
         ]
 
@@ -157,8 +156,15 @@ class PhotoProcessor:
         except OSError as e:
             raise RuntimeError(f"Failed to cleanup temp directory {temp_dir}: {e}")
 
+    def copy_non_live_photo(self, relative_path: str, full_path: str) -> None:
+        """Copy a non-Live Photo file directly to target directory using Python."""
+        target_path = self.target_dir / relative_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(full_path, target_path)
+        self.logger.info(f"Copied: {relative_path}")
+
     def process_files(self, files: List[Tuple[str, str]]) -> int:
-        """Process files in batches, keeping Live Photo pairs together."""
+        """Process files - Live Photo pairs via motionphoto2, non-Live Photos via direct copy."""
         if not files:
             return 0
 
@@ -175,9 +181,9 @@ class PhotoProcessor:
             ext = path_obj.suffix.lower()
             basename_groups[basename].append((relative_path, full_path, ext))
 
-        # Identify Live Photo pairs and single files
+        # Identify Live Photo pairs and non-Live Photo files
         pairs = []  # List of (photo_path, video_path) tuples
-        singles = []  # List of (relative_path, full_path) for unpaired files
+        non_live_photos = []  # List of (relative_path, full_path) for unpaired files
 
         for basename, group in basename_groups.items():
             if len(group) == 2:
@@ -190,68 +196,67 @@ class PhotoProcessor:
                         group[0], group[1] = group[1], group[0]
                     pairs.append(((group[0][0], group[0][1]), (group[1][0], group[1][1])))
                 else:
-                    # Same type, treat as singles
+                    # Same type, treat as non-Live Photos
                     for item in group:
-                        singles.append((item[0], item[1]))
+                        non_live_photos.append((item[0], item[1]))
             else:
-                # Single file or more than 2 files with same basename
+                # Non-Live Photo file or more than 2 files with same basename
                 for item in group:
-                    singles.append((item[0], item[1]))
+                    non_live_photos.append((item[0], item[1]))
 
-        self.logger.info(f"Found {len(pairs)} Live Photo pairs and {len(singles)} single files")
+        self.logger.info(f"Found {len(pairs)} Live Photo pairs and {len(non_live_photos)} non-Live Photos")
 
-        # Create batches treating pairs as atomic units
+        processed_count = 0
+
+        # Process non-Live Photos via direct Python copy
+        if non_live_photos:
+            self.logger.info(f"Copying {len(non_live_photos)} non-Live Photos directly...")
+            for relative_path, full_path in non_live_photos:
+                try:
+                    self.copy_non_live_photo(relative_path, full_path)
+                    self.db.add_processed([relative_path])
+                    processed_count += 1
+                except Exception as e:
+                    raise RuntimeError(f"Failed to copy non-Live Photo {relative_path}: {e}")
+            self.logger.info(f"Non-Live Photo copy complete")
+
+        # Create batches of Live Photo pairs for motionphoto2
         batches = []
         current_batch = []
-        current_batch_count = 0  # Count pairs as 1 unit, singles as 1 unit
 
-        # Add pairs first (process pairs together)
         for photo, video in pairs:
-            if current_batch_count >= self.BATCH_SIZE:
+            if len(current_batch) >= self.BATCH_SIZE:
                 batches.append(current_batch)
                 current_batch = []
-                current_batch_count = 0
             current_batch.extend([photo, video])
-            current_batch_count += 1  # Pair counts as 1 unit
 
-        # Add singles
-        for single in singles:
-            if current_batch_count >= self.BATCH_SIZE:
-                batches.append(current_batch)
-                current_batch = []
-                current_batch_count = 0
-            current_batch.append(single)
-            current_batch_count += 1
-
-        # Don't forget the last batch
         if current_batch:
             batches.append(current_batch)
 
-        # Process batches
-        processed_count = 0
-        total_batches = len(batches)
+        # Process Live Photo pair batches via motionphoto2
+        if batches:
+            total_batches = len(batches)
+            for batch_num, batch in enumerate(batches):
+                self.logger.info(f"Processing batch {batch_num + 1}/{total_batches} ({len(batch)} Live Photo files)")
 
-        for batch_num, batch in enumerate(batches):
-            self.logger.info(f"Processing batch {batch_num + 1}/{total_batches} ({len(batch)} files)")
-
-            temp_dir = self.create_temp_symlinks(batch)
-            try:
-                self.run_motionphoto2(temp_dir)
-
+                temp_dir = self.create_temp_symlinks(batch)
                 batch_paths = []
-                for relative_path, _ in batch:
-                    batch_paths.append(relative_path)
-                    self.logger.info(f"Processed: {relative_path}")
+                try:
+                    self.run_motionphoto2(temp_dir)
 
-                processed_count += len(batch)
-                self.logger.info(f"Batch {batch_num + 1} complete")
+                    for relative_path, _ in batch:
+                        batch_paths.append(relative_path)
+                        self.logger.info(f"Processed Live Photo: {relative_path}")
 
-                # Record batch to database immediately
+                    processed_count += len(batch)
+                    self.logger.info(f"Batch {batch_num + 1} complete")
+
+                finally:
+                    self.cleanup_temp_dir(temp_dir)
+
+                # Record batch progress immediately
                 if batch_paths:
                     self.db.add_processed(batch_paths)
-
-            finally:
-                self.cleanup_temp_dir(temp_dir)
 
         # Clean up old target files
         self.cleanup_old_targets()
